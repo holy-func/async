@@ -1,48 +1,62 @@
 package async
 
 import (
+	"fmt"
 	"reflect"
+	"sync"
 )
 
-var asyncFuncs = []*GoPromise{}
-var promiseTasks = []*GoPromise{}
-var Pending State = "Pending"
-var Resolved State = "Resolved"
-var Rejected State = "Rejected"
-var dev = "development"
-var prod = "production"
-var env = dev
-var promiseType = &GoPromise{}
+const Pending State = "Pending"
+const Resolved State = "Resolved"
+const Rejected State = "Rejected"
+const dev = "development"
+const prod = "production"
 
+var wg sync.WaitGroup
+var env = dev
+var promiseType = reflect.TypeOf(&GoPromise{})
+
+type Thenable struct {
+	Then promiseTask
+}
 type lock struct {
 	async chan int
 	ret   interface{}
 	state State
+	err   bool
 }
 type State string
 type Handler func(interface{})
 type promiseTask func(Handler, Handler)
 type CallBack func(interface{}) interface{}
-type finally func()
+type finallyHandler func()
 type AsyncTask func(...interface{}) interface{}
+type Settled struct {
+	Status State
+	value  interface{}
+}
+type then struct {
+	success CallBack
+	fail    CallBack
+	*GoPromise
+}
+type catch struct {
+	handler CallBack
+	*GoPromise
+}
+type finally struct {
+	handler finallyHandler
+	*GoPromise
+}
+type prototype struct {
+	*then
+	*catch
+	*finally
+}
 
-func defaultResolvedThenHandler(ret interface{}) interface{} {
-	return ret
-}
-func handleException(err *interface{}, reject Handler) {
-	if *err != nil {
-		reject(*err)
-	}
-}
-
-type Async struct {
-	Await func() (interface{}, interface{})
-}
 type GoPromise struct {
 	*lock
-	then    [][]CallBack
-	finally []finally
-	catched bool
+	*prototype
 }
 
 func DEV() {
@@ -51,200 +65,370 @@ func DEV() {
 func PROD() {
 	env = prod
 }
-func catchError(err *interface{}, catched bool, p *GoPromise) {
-	if env == prod || catched || (p != nil && p.settled()) {
-		*err = recover()
+func pendingERROR() {
+	if env == prod {
+		return
+	}
+	panic("promise will be pending forever")
+}
+func (p *GoPromise) callback() {
+	if p.prototype != nil {
+		defer func() {
+			p.prototype = nil
+		}()
+		if p.prototype.then != nil {
+			v := p.prototype.then
+			if p.resolved() {
+				go v.execPromise(func(resolve, reject Handler) {
+					if v.success != nil {
+						resolve(v.success(p.ret))
+					} else {
+						resolve(p.ret)
+					}
+				})
+			} else if p.rejected() {
+				go v.execPromise(func(resolve, reject Handler) {
+					if v.fail != nil {
+						p.err = false
+						resolve(v.fail(p.ret))
+					} else {
+						reject(p.ret)
+					}
+				})
+			}
+		} else if p.prototype.catch != nil {
+			v := p.prototype.catch
+			if v.handler != nil {
+				p.err = false
+			}
+			go v.execPromise(func(resolve, reject Handler) {
+				if p.rejected() {
+					if v.handler != nil {
+						resolve(v.handler(p.ret))
+					} else {
+						reject(p.ret)
+					}
+				} else {
+					resolve(p.ret)
+				}
+			})
+		} else if p.prototype.finally != nil {
+			v := p.prototype.finally
+			go v.execPromise(func(resolve, reject Handler) {
+				v.handler()
+				resolve(p.ret)
+			})
+		}
 	}
 }
-func (l *lock) runError(err interface{}) {
-	l.state = Rejected
-	l.ret = err
+func (p *GoPromise) endTask() {
+	if p.settled() {
+		func() {
+			defer catchAnyError()
+			close(p.async)
+		}()
+		p.callback()
+		clearTask()
+	} else {
+		pendingERROR()
+	}
 }
-func (l *lock) execAsync(task AsyncTask, params []interface{}) {
-	go l.end()
-	var err interface{}
-	defer l.start()
-	defer handleException(&err, l.runError)
-	defer catchError(&err, false, nil)
-	l.ret = task(params...)
-}
+func (l *lock) waitTask() {
+	if l.settled() {
+		return
+	}
+	<-l.async
+	// for !l.settled(){
 
+	// }
+}
+func (l *lock) uncatchedError() {
+	if env == prod {
+		return
+	}
+	fmt.Print("uncatched error ")
+	panic(l.ret)
+}
+func (l *lock) uncatchedRejected() {
+	if env == prod {
+		return
+	}
+	fmt.Print("uncatched rejected ")
+	panic(l.ret)
+}
+func meaninglessError() {
+	if env == prod {
+		return
+	}
+	panic("this func call is meaningless")
+}
+func (l *lock) settled() bool {
+	return l.state == Rejected || l.state == Resolved
+}
+func (l *lock) resolve(v interface{}) {
+	if !l.settled() {
+		ret, err := deepAwait(v, v, nil)
+		if err != nil {
+			l.reject(err)
+		} else {
+			l.state = Resolved
+			l.ret = ret
+		}
+	}
+}
+func (l *lock) reject(v interface{}) {
+	if !l.settled() {
+		l.ret = v
+		l.state = Rejected
+	}
+}
 func (l *lock) Await() (ret interface{}, err interface{}) {
-	l.end()
+	l.waitTask()
 	if l.state == Resolved {
 		err = nil
 		ret = l.ret
-	} else if l.state == Rejected {
+		ret, err = deepAwait(ret, ret, err)
+	} else {
+		if l.err {
+			l.uncatchedError()
+		} else {
+			l.uncatchedRejected()
+		}
 		err = l.ret
 		ret = nil
 	}
 	return
 }
-func (p *GoPromise) Await() (ret interface{}, err interface{}) {
-	ret, err = p.lock.Await()
-	if reflect.TypeOf(ret) == reflect.TypeOf(promiseType) {
-		promise := ret.(*GoPromise)
-		ret, err = promise.Await()
+func catchAnyError() interface{} {
+	err := recover()
+	return err
+}
+func collectTask() {
+	defer catchAnyError()
+	wg.Add(1)
+}
+func clearTask() {
+	defer catchAnyError()
+	wg.Done()
+}
+func (l *lock) UnsafeAwait() (ret interface{}, err interface{}) {
+	l.waitTask()
+	if l.state == Resolved {
+		err = nil
+		ret = l.ret
+		ret, err = deepAwait(ret, ret, err)
+	} else {
+		err = l.ret
+		ret = nil
 	}
 	return
 }
-func (l *lock) start() {
-	close(l.async)
-}
-func (l *lock) end() {
-	if l.settled() {
-		return
+func deepAwait(promise, ret, err interface{}) (interface{}, interface{}) {
+	newRet, newErr := ret, err
+	if reflect.TypeOf(promise) == promiseType {
+		v := promise.(*GoPromise)
+		newRet, newErr = v.Await()
+	} else if thenableStruct, isThenable := promise.(*Thenable); isThenable {	
+		promise := gPromise()
+		promise.execPromise(thenableStruct.Then)
+		newRet, newErr = promise.Await()
 	}
-	<-l.async
-	l.state = Resolved
+	return newRet, newErr
 }
-func (l *lock) settled() bool {
-	return l.state == Rejected || l.state == Resolved
+func (p *GoPromise) resolved() bool {
+	return p.state == Resolved
 }
-func (p *GoPromise) start() {
-	p.thenHandler()
-	p.finallyHandler()
-	p.lock.start()
-}
-func (p *GoPromise) Then(callbacks ...CallBack) *GoPromise {
-	if len(callbacks) > 0 {
-		p.then = append(p.then, callbacks)
-		if len(callbacks) == 2 {
-			p.catched = true
-		}
-	}
-	return p
-}
-func (p *GoPromise) Catch(callback CallBack) *GoPromise {
-	p.catched = true
-	p.then = append(p.then, []CallBack{defaultResolvedThenHandler, callback})
-	return p
-}
-func setExecption(p *GoPromise, excption bool) {
-	p.catched = excption
-}
-func (p *GoPromise) NoExecption() *GoPromise {
-	setExecption(p, true)
-	return p
-}
-func (p *GoPromise) Finally(finally func()) *GoPromise {
-	p.finally = append(p.finally, finally)
-	p.then = append(p.then, nil)
-	return p
-}
-func (p *GoPromise) finallyHandler() {
-}
-func (p *GoPromise) thenHandler() {
-	current := p
-	finallyIndex := 0
-	for _, callback := range p.then {
-		if callback == nil {
-			func() {
-				var err interface{}
-				defer handleException(&err, current.unexpected)
-				defer catchError(&err, true, nil)
-				p.finally[finallyIndex]()
-				finallyIndex++
-			}()
-			continue
-		}
-		if reflect.TypeOf(current.ret) == reflect.TypeOf(promiseType) {
-			current = current.ret.(*GoPromise)
-			func() {
-				var err interface{}
-				defer handleException(&err, current.reject)
-				defer catchError(&err, true, nil)
-				current.Await()
-			}()
-		}
-		func() {
-			var err interface{}
-			defer handleException(&err, current.unexpected)
-			defer catchError(&err, true, nil)
-			if current.state == Resolved && len(callback) > 0 {
-				current.ret = callback[0](current.ret)
-			} else if current.state == Rejected && len(callback) == 2 {
-				current.ret = callback[1](current.ret)
-				current.state = Resolved
-			}
-		}()
-
-	}
-	if current.state == Rejected {
-		panic("error not catch2")
-		// 这里错误没有处理进行报错
-	}
-	if reflect.TypeOf(current.ret) == reflect.TypeOf(promiseType) {
-		excption := current.catched
-		current = current.ret.(*GoPromise)
-		setExecption(current, excption)
-		current.Await()
-	}
-}
-func (p *GoPromise) execPromise(task promiseTask) {
-	go p.end()
-	var err interface{}
-	defer p.start()
-	defer handleException(&err, p.reject)
-	defer catchError(&err, p.catched, p)
-	task(p.resolve, p.reject)
-}
-func (p *GoPromise) resolve(ret interface{}) {
-	if p.settled() {
-		return
-	}
-	p.ret = ret
-	p.state = Resolved
-}
-func (p *GoPromise) reject(ret interface{}) {
-	if p.settled() {
-		return
-	}
-	p.ret = ret
-	p.state = Rejected
-}
-func (p *GoPromise) unexpected(ret interface{}) {
-	p.state = Rejected
-	p.ret = ret
-}
-func Do(task AsyncTask, params ...interface{}) *Async {
-	return executeAsyncTask(task, &asyncFuncs, params)
-}
-func executeAsyncTask(task AsyncTask, store *[]*GoPromise, params []interface{}) *Async {
-	async := gAsync()
-	*store = append(*store, async)
-	go async.execAsync(task, params)
-	return &Async{async.Await}
-}
-func executePromiseTask(task promiseTask, store *[]*GoPromise) *GoPromise {
-	async := gPromise(nil, Pending)
-	*store = append(*store, async)
-	go async.execPromise(task)
-	return async
-}
-func Wait() {
-	for _, async := range asyncFuncs {
-		async.Await()
-	}
-	for _, async := range promiseTasks {
-		async.Await()
-	}
-}
-func Promise(task promiseTask) *GoPromise {
-	return executePromiseTask(task, &promiseTasks)
+func (p *GoPromise) rejected() bool {
+	return p.state == Rejected
 }
 func Resolve(v interface{}) *GoPromise {
-	return gPromise(v, Resolved)
-}
-func gPromise(v interface{}, state State) *GoPromise {
-	if reflect.TypeOf(v) == reflect.TypeOf(promiseType) {
-		return v.(*GoPromise)
+	if _, isThenable := v.(*Thenable); isThenable || reflect.TypeOf(v) == promiseType {
+		ret, err := deepAwait(v, v, nil)
+		if err == nil {
+			return Resolve(ret)
+		} else {
+			return Reject(err)
+		}
+	} else {
+		promise := gPromise()
+		promise.resolve(v)
+		promise.endTask()
+		return promise
 	}
-	return &GoPromise{&lock{make(chan int), v, state}, [][]CallBack{}, []finally{}, false}
-}
-func gAsync() *GoPromise {
-	return &GoPromise{&lock{make(chan int), nil, Pending}, nil, nil, false}
 }
 func Reject(v interface{}) *GoPromise {
-	return gPromise(v, Rejected)
+	promise := gPromise()
+	promise.reject(v)
+	promise.endTask()
+	return promise
+}
+func gPromise() *GoPromise {
+	return &GoPromise{&lock{make(chan int), nil, Pending, false}, nil}
+}
+func Do(task AsyncTask, params ...interface{}) *GoPromise {
+	promise := gPromise()
+	go promise.execPromise(func(resolve, reject Handler) {
+		resolve(task(params...))
+	})
+	return promise
+}
+func catchError(p *GoPromise) {
+	err := recover()
+	if p.settled() {
+		err = nil
+	} else if err != nil {
+		p.reject(err)
+		p.err = true
+	}
+	p.endTask()
+}
+
+func (p *GoPromise) execPromise(task promiseTask) {
+	defer catchError(p)
+	collectTask()
+	task(p.resolve, p.reject)
+}
+func Promise(task promiseTask) *GoPromise {
+	promise := gPromise()
+	go promise.execPromise(task)
+	return promise
+}
+func (p *GoPromise) handleCallback() {
+	if p.settled() {
+		p.callback()
+	}
+}
+func (p *GoPromise) Then(success, fail CallBack) *GoPromise {
+	promise := gPromise()
+	p.prototype = &prototype{&then{success, fail, promise}, nil, nil}
+	go p.handleCallback()
+	return promise
+}
+func (p *GoPromise) Catch(handler CallBack) *GoPromise {
+	promise := gPromise()
+	p.prototype = &prototype{nil, &catch{handler, promise}, nil}
+	go p.handleCallback()
+	return promise
+}
+func (p *GoPromise) Finally(handler finallyHandler) *GoPromise {
+	promise := gPromise()
+	p.prototype = &prototype{nil, nil, &finally{handler, promise}}
+	go p.handleCallback()
+	return promise
+}
+func Wait() {
+	defer catchAnyError()
+	wg.Wait()
+}
+func Race(promises ...*GoPromise) *GoPromise {
+	if len(promises) == 0 {
+		meaninglessError()
+		return nil
+	}
+	wait := make(chan int)
+	var newPromise *GoPromise
+	newPromise = Promise(func(resolve, reject Handler) {
+		for _, promise := range promises {
+			go func(promise *GoPromise) {
+				ret, err := promise.UnsafeAwait()
+				if newPromise.settled() {
+					return
+				}
+				if err == nil {
+					resolve(ret)
+				} else {
+					reject(err)
+				}
+				close(wait)
+			}(promise)
+		}
+		<-wait
+	})
+	return newPromise
+}
+func All(promises ...*GoPromise) *GoPromise {
+	if len(promises) == 0 {
+		meaninglessError()
+		return nil
+	}
+	result := make([]interface{}, len(promises))
+	var wg sync.WaitGroup
+	count := 0
+	var newPromise *GoPromise
+	newPromise = Promise(func(resolve, reject Handler) {
+		for i, promise := range promises {
+			wg.Add(1)
+			go func(i int, promise *GoPromise) {
+				ret, err := promise.UnsafeAwait()
+				if newPromise.settled() {
+					return
+				}
+				if err == nil {
+					result[i] = ret
+					count++
+					wg.Done()
+				} else {
+					reject(err)
+					for i := count; i < len(promises); i++ {
+						wg.Done()
+					}
+				}
+			}(i, promise)
+		}
+		wg.Wait()
+		resolve(result)
+	})
+	return newPromise
+}
+func AllSettled(promises ...*GoPromise) *GoPromise {
+	if len(promises) == 0 {
+		meaninglessError()
+		return nil
+	}
+	return Promise(func(resolve, reject Handler) {
+		result := make([]Settled, len(promises))
+		for i, promise := range promises {
+			ret, err := promise.UnsafeAwait()
+			if err == nil {
+				result[i] = Settled{Resolved, ret}
+			} else {
+				result[i] = Settled{Rejected, err}
+			}
+		}
+		resolve(result)
+	})
+}
+func Any(promises ...*GoPromise) *GoPromise {
+	if len(promises) == 0 {
+		meaninglessError()
+		return nil
+	}
+	result := make([]interface{}, len(promises))
+	var wg sync.WaitGroup
+	count := 0
+	var newPromise *GoPromise
+	newPromise = Promise(func(resolve, reject Handler) {
+		for i, promise := range promises {
+			wg.Add(1)
+			go func(i int, promise *GoPromise) {
+				ret, err := promise.UnsafeAwait()
+				if newPromise.settled() {
+					return
+				}
+				if err != nil {
+					result[i] = err
+					count++
+					wg.Done()
+				} else {
+					resolve(ret)
+					for i := count; i < len(promises); i++ {
+						wg.Done()
+					}
+				}
+			}(i, promise)
+		}
+		wg.Wait()
+		reject(result)
+	})
+	return newPromise
 }
