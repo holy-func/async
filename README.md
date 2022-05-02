@@ -3,7 +3,7 @@
 ### async.Do()
 这个函数接受一个想要异步调用的函数asyncTask和它的参数，返回*async.GoPromise
 ### async.Promise()
-这个函数接受一个想要异步调用的函数promiseTask,在调用时会传入resolve和reject方法用来控制该promise的状态，状态一旦settled(resolved or rejected)便不可以再改变,返回一个*async.GoPromise结构体
+这个函数接受一个想要异步调用的函数promiseTask,在调用时会传入resolve和reject方法用来控制该promise的状态，状态一旦settled(resolved or rejected)便不可以再改变,返回一个*async.GoPromise结构体 与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除了调用泛wait方法不会阻塞当前函数执行
 #### *GoPromise
 ##### Await()
 等待promise settled 并返回结果和错误信息,若reject未处理则panic
@@ -30,7 +30,7 @@ promise settled后一定会执行的函数 返回一个新的*async.GOPromise
 ### async.DEV()
 开启开发环境,默认开启,未处理的reject会报错
 ### async.Resolve()
-返回一个resolved的*async.GoPromise追踪终态
+返回一个resolved的*async.GoPromise并追踪终态
 ### async.Reject()
 返回一个rejected的*async.GoPromise不追踪终态
 
@@ -40,7 +40,7 @@ package main
 import (
 	"fmt"
 	"time"
-	"wander/asyncLib/async"
+	"github.com/holy-func/async"
 )
 
 func action(b ...interface{}) interface{} {
@@ -62,6 +62,17 @@ func actionC(resolve, reject async.Handler) {
 	resolve(3)
 }
 
+type then struct {
+	name string
+	age  int
+}
+
+func (t *then) Then(resolve, reject async.Handler) {
+	fmt.Println("姓名:", t.name)
+	fmt.Println("年龄:", t.age)
+	fmt.Println("introduce over!!!")
+	resolve(async.Promise(actionC))
+}
 func main() {
 	a := async.Promise(actionA)
 	b := async.Promise(actionB)
@@ -99,26 +110,31 @@ func main() {
 		fmt.Println("C rejected", err)
 		return "C!OK"
 	}).Await()
-	async.Resolve(100).Then(func(v interface{})interface{}{
-		fmt.Println("11",v)
+	async.Resolve(&then{"holy-func", 19}).Then(func(v interface{}) interface{} {
+		fmt.Println("跟随resolve会得到最终的值为100 ----", v)
 		return 1
-	},nil)
+	}, nil)
 	async.Wait()
 }
 ```
 ### 输出结果
 ```
-A
-C
 B
 B rejected and catched 2
 resolved---- B failed
-3
-A rejected &{0xc000092000 <nil>}
+A
+C
+A rejected &{0xc00007a6c0 <nil>}
 A!OK task A
 task A end!!!
+3
 7
 C resolved 100
 resolve 的promise或*async.Thenable会采取最终态
-11 100
+姓名: holy-func
+年龄: 19
+introduce over!!!
+C
+7
+跟随resolve会得到最终的值为100 ---- 100
 ```

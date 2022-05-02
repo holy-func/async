@@ -2,7 +2,6 @@ package async
 
 import (
 	"fmt"
-	"reflect"
 	"sync"
 )
 
@@ -14,11 +13,11 @@ const prod = "production"
 
 var wg sync.WaitGroup
 var env = dev
-var promiseType = reflect.TypeOf(&GoPromise{})
 
-type Thenable struct {
-	Then promiseTask
+type Thenable interface {
+	Then(Handler, Handler)
 }
+
 type lock struct {
 	async chan int
 	ret   interface{}
@@ -123,10 +122,7 @@ func (p *GoPromise) callback() {
 }
 func (p *GoPromise) endTask() {
 	if p.settled() {
-		func() {
-			defer catchAnyError()
-			close(p.async)
-		}()
+		close(p.async)
 		p.callback()
 		clearTask()
 	} else {
@@ -138,9 +134,6 @@ func (l *lock) waitTask() {
 		return
 	}
 	<-l.async
-	// for !l.settled(){
-
-	// }
 }
 func (l *lock) uncatchedError() {
 	if env == prod {
@@ -199,16 +192,10 @@ func (l *lock) Await() (ret interface{}, err interface{}) {
 	}
 	return
 }
-func catchAnyError() interface{} {
-	err := recover()
-	return err
-}
 func collectTask() {
-	defer catchAnyError()
 	wg.Add(1)
 }
 func clearTask() {
-	defer catchAnyError()
 	wg.Done()
 }
 func (l *lock) UnsafeAwait() (ret interface{}, err interface{}) {
@@ -223,14 +210,20 @@ func (l *lock) UnsafeAwait() (ret interface{}, err interface{}) {
 	}
 	return
 }
+func isPromise(v interface{}) (*GoPromise, bool) {
+	obj, ok := v.(*GoPromise)
+	return obj, ok
+}
+func isThenable(v interface{}) (Thenable, bool) {
+	obj, ok := v.(Thenable)
+	return obj, ok
+}
 func deepAwait(promise, ret, err interface{}) (interface{}, interface{}) {
 	newRet, newErr := ret, err
-	if reflect.TypeOf(promise) == promiseType {
-		v := promise.(*GoPromise)
+	if v, ok := isPromise(promise); ok {
 		newRet, newErr = v.Await()
-	} else if thenableStruct, isThenable := promise.(*Thenable); isThenable {	
-		promise := gPromise()
-		promise.execPromise(thenableStruct.Then)
+	} else if thenableStruct, isThenable := isThenable(promise); isThenable {
+		promise := Promise(thenableStruct.Then)
 		newRet, newErr = promise.Await()
 	}
 	return newRet, newErr
@@ -242,7 +235,9 @@ func (p *GoPromise) rejected() bool {
 	return p.state == Rejected
 }
 func Resolve(v interface{}) *GoPromise {
-	if _, isThenable := v.(*Thenable); isThenable || reflect.TypeOf(v) == promiseType {
+	_, ok1 := isThenable(v)
+	_, ok2 := isPromise(v)
+	if ok1 || ok2 {
 		ret, err := deepAwait(v, v, nil)
 		if err == nil {
 			return Resolve(ret)
@@ -250,27 +245,23 @@ func Resolve(v interface{}) *GoPromise {
 			return Reject(err)
 		}
 	} else {
-		promise := gPromise()
-		promise.resolve(v)
-		promise.endTask()
-		return promise
+		return Promise(func(resolve, reject Handler) {
+			resolve(v)
+		})
 	}
 }
 func Reject(v interface{}) *GoPromise {
-	promise := gPromise()
-	promise.reject(v)
-	promise.endTask()
-	return promise
+	return Promise(func(resolve, reject Handler) {
+		reject(v)
+	})
 }
 func gPromise() *GoPromise {
 	return &GoPromise{&lock{make(chan int), nil, Pending, false}, nil}
 }
 func Do(task AsyncTask, params ...interface{}) *GoPromise {
-	promise := gPromise()
-	go promise.execPromise(func(resolve, reject Handler) {
+	return Promise(func(resolve, reject Handler) {
 		resolve(task(params...))
 	})
-	return promise
 }
 func catchError(p *GoPromise) {
 	err := recover()
@@ -285,11 +276,11 @@ func catchError(p *GoPromise) {
 
 func (p *GoPromise) execPromise(task promiseTask) {
 	defer catchError(p)
-	collectTask()
 	task(p.resolve, p.reject)
 }
 func Promise(task promiseTask) *GoPromise {
 	promise := gPromise()
+	collectTask()
 	go promise.execPromise(task)
 	return promise
 }
@@ -300,24 +291,26 @@ func (p *GoPromise) handleCallback() {
 }
 func (p *GoPromise) Then(success, fail CallBack) *GoPromise {
 	promise := gPromise()
+	collectTask()
 	p.prototype = &prototype{&then{success, fail, promise}, nil, nil}
 	go p.handleCallback()
 	return promise
 }
 func (p *GoPromise) Catch(handler CallBack) *GoPromise {
 	promise := gPromise()
+	collectTask()
 	p.prototype = &prototype{nil, &catch{handler, promise}, nil}
 	go p.handleCallback()
 	return promise
 }
 func (p *GoPromise) Finally(handler finallyHandler) *GoPromise {
 	promise := gPromise()
+	collectTask()
 	p.prototype = &prototype{nil, nil, &finally{handler, promise}}
 	go p.handleCallback()
 	return promise
 }
 func Wait() {
-	defer catchAnyError()
 	wg.Wait()
 }
 func Race(promises ...*GoPromise) *GoPromise {
