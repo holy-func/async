@@ -1,3 +1,5 @@
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/holy-func/async?tab=doc) 
+
 # async
 一个模仿javascript中的async和promise的库，以同步的方式书写并发代码
 ### async.Do()
