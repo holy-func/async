@@ -24,23 +24,51 @@ go get github.com/holy-func/async
 接收一个想要异步调用的函数PromiseTask,在调用时会传入resolve和reject方法用来控制该Promise的状态,状态一旦settled(resolved or rejected)便不可以再改变,返回*async.GoPromise 
 
 ##### 注意！
-与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除非调用泛wait方法,即不会阻塞当前函数执行
+与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同Do和Promise中传入的回调函数都不会立即执行而是开启协程去执行即除非调用泛wait方法,即调用这两个方法不会阻塞当前函数执行
 
 ```golang
 func main() {
-	promise := async.Promise(func(resolve, reject async.Handler) {
+	promise1 := async.Promise(func(resolve, reject async.Handler) {
+		fmt.Println("p1 start!")
 		resolve(100)
+		fmt.Println("p1 end!")
 	})
-	fmt.Println(promise)
-	promise.Await()
-	fmt.Println(promise)
+	fmt.Println(promise1)
+	promise2 := async.Promise(func(resolve, reject async.Handler) {
+		fmt.Println("p2 start!")
+		reject(1000)
+		fmt.Println("p2 end!")
+	})
+	fmt.Println(promise2)
+	promise1.Await()
+	promise2.UnsafeAwait()
+	fmt.Println("promise1:", promise1)
+	fmt.Println("promise2:", promise2)
+	promise3 := async.Promise(func(resolve, reject async.Handler) {
+		fmt.Println("p3 start!")
+		resolve(10000)
+		fmt.Println("p3 end!")
+	})
+	async.Wait()
+	fmt.Println("promise3:", promise3)
+	fmt.Println("all task end!")
 }
 ```
 
 ### 输出结果
 ```
 Promise { <pending> }
-Promise { 100 }
+Promise { <pending> }
+p2 start!
+p2 end!
+p1 start!
+p1 end!
+promise1: Promise { 100 }
+promise2: Promise { <rejected> 1000 }
+p3 start!
+p3 end!
+promise3: Promise { 10000 }
+all task end!
 ```
 #### *GoPromise
 
