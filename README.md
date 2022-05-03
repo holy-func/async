@@ -21,7 +21,10 @@ go get github.com/holy-func/async
 接收一个想要异步调用的函数asyncTask和它的参数,返回*async.GoPromise
 
 ### async.Promise()
-接收一个想要异步调用的函数PromiseTask,在调用时会传入resolve和reject方法用来控制该Promise的状态,状态一旦settled(resolved or rejected)便不可以再改变,返回一个*async.GoPromise 与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除非调用泛wait方法,即不会阻塞当前函数执行
+接收一个想要异步调用的函数PromiseTask,在调用时会传入resolve和reject方法用来控制该Promise的状态,状态一旦settled(resolved or rejected)便不可以再改变,返回*async.GoPromise 
+
+##### 注意！
+与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除非调用泛wait方法,即不会阻塞当前函数执行
 
 ```golang
 func main() {
