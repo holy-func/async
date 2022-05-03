@@ -1,42 +1,79 @@
 [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/holy-func/async?tab=doc) 
 
-# async
-一个模仿javascript中的async和promise的库，以同步的方式书写并发代码
+介绍
+------------
+
+async是一个模仿javascript中的async和Promise的库,能够使开发者在Go语言中以同步的方式书写并发代码
+
+
+安装
+------------
+
+##### Windows/macOS/Linux
+
+```powershell
+go get github.com/holy-func/async
+```
+
+文档
+------------
 ### async.Do()
-这个函数接受一个想要异步调用的函数asyncTask和它的参数，返回*async.GoPromise
+接收一个想要异步调用的函数asyncTask和它的参数,返回*async.GoPromise
+
 ### async.Promise()
-这个函数接受一个想要异步调用的函数promiseTask,在调用时会传入resolve和reject方法用来控制该promise的状态，状态一旦settled(resolved or rejected)便不可以再改变,返回一个*async.GoPromise结构体 与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除了调用泛wait方法不会阻塞当前函数执行
+接收一个想要异步调用的函数PromiseTask,在调用时会传入resolve和reject方法用来控制该Promise的状态,状态一旦settled(resolved or rejected)便不可以再改变,返回一个*async.GoPromise 与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同这里传入的回调函数不会立即执行即除非调用泛wait方法,即不会阻塞当前函数执行
+
+```golang
+func main() {
+	promise := async.Promise(func(resolve, reject async.Handler) {
+		resolve(100)
+	})
+	fmt.Println(promise)
+	promise.Await()
+	fmt.Println(promise)
+}
+```
+
+### 输出结果
+```
+Promise { <pending> }
+Promise { 100 }
+```
 #### *GoPromise
+
 ##### Await()
-等待promise settled 并返回结果和错误信息,若reject未处理则panic
+等待Promise settled 并返回结果P和错误信息,若reject未处理则panic
 ##### UnsafeAwait()
-等待promise settled 并返回结果和错误信息,无论是否rejected都可以获取到
+等待Promise settled 并返回结果和错误信息,无论是否rejected都可以获取到
 ##### Then()
-promise settled 后的回调函数 返回一个新的*async.GOPromise
+Promise settled 后的回调函数 返回一个新的 *async.GOPromise
 ##### Catch() 
-promise rejected 后的回调函数 返回一个新的*async.GOPromise
+Promise rejected 后的回调函数 返回一个新的 *async.GOPromise
 ##### Finally() 
-promise settled后一定会执行的函数 返回一个新的*async.GOPromise
+Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ### async.Wait()
-阻塞调用该方法的函数并等待使用async包发起的所有asyncTask和promiseTask的完成
+阻塞调用该方法的函数并等待使用async包发起的所有asyncTask和PromiseTask的完成
 ### async.All()
-接受n个*async.GOPromise, 返回的 *async.GoPromise 在任意一个task rejected或者全部resolved的时候resolve
+接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task rejected或者全部resolved的时候resolve
 ### async.Any()
-接受n个*async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者全部rejected的时候resolve
+接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者全部rejected的时候resolve
 ### async.Race()
-接受n个*async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者rejected的时候resolve
+接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者rejected的时候resolve
 ### async.AllSettled()
-接受n个*async.GOPromise, 返回的 *async.GoPromise 在所有task resolved或者rejected的时候resolve
+接收n个 *async.GOPromise, 返回的 *async.GoPromise 在所有task resolved或者rejected的时候resolve
 ### async.PROD()
 开启生产环境,此时Await()与UnsafeAwait()等价,未处理的reject不会panic
 ### async.DEV()
 开启开发环境,默认开启,未处理的reject会报错
 ### async.Resolve()
-返回一个resolved的*async.GoPromise并追踪终态
+返回一个resolved的 *async.GoPromise并追踪终态
 ### async.Reject()
-返回一个rejected的*async.GoPromise不追踪终态
+返回一个rejected的 *async.GoPromise不追踪终态
 
-```
+代码示例
+------------
+
+```golang
 package main
 
 import (
@@ -106,7 +143,7 @@ func main() {
 	})
 	c.Then(func(v interface{}) interface{} {
 		fmt.Println("C resolved", v)
-		fmt.Println("resolve 的promise或*async.Thenable会采取最终态")
+		fmt.Println("resolve 的Promise或*async.Thenable会采取最终态")
 		return "COK"
 	}, func(err interface{}) interface{} {
 		fmt.Println("C rejected", err)
@@ -132,7 +169,7 @@ task A end!!!
 3
 7
 C resolved 100
-resolve 的promise或*async.Thenable会采取最终态
+resolve 的 Promise或 *async.Thenable 会采取最终态
 姓名: holy-func
 年龄: 19
 introduce over!!!

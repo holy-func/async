@@ -5,9 +5,9 @@ import (
 	"sync"
 )
 
-const Pending State = "Pending"
-const Resolved State = "Resolved"
-const Rejected State = "Rejected"
+const Pending State = "pending"
+const Resolved State = "resolved"
+const Rejected State = "rejected"
 const dev = "development"
 const prod = "production"
 
@@ -139,15 +139,13 @@ func (l *lock) uncatchedError() {
 	if env == prod {
 		return
 	}
-	fmt.Print("uncatched error ")
-	panic(l.ret)
+	panic("uncatched error " + l.String())
 }
 func (l *lock) uncatchedRejected() {
 	if env == prod {
 		return
 	}
-	fmt.Print("uncatched rejected ")
-	panic(l.ret)
+	panic("uncatched rejected " + l.String())
 }
 func meaninglessError() {
 	if env == prod {
@@ -228,11 +226,11 @@ func deepAwait(promise, ret, err interface{}) (interface{}, interface{}) {
 	}
 	return newRet, newErr
 }
-func (p *GoPromise) resolved() bool {
-	return p.state == Resolved
+func (l *lock) resolved() bool {
+	return l.state == Resolved
 }
-func (p *GoPromise) rejected() bool {
-	return p.state == Rejected
+func (l *lock) rejected() bool {
+	return l.state == Rejected
 }
 func Resolve(v interface{}) *GoPromise {
 	_, ok1 := isThenable(v)
@@ -273,7 +271,15 @@ func catchError(p *GoPromise) {
 	}
 	p.endTask()
 }
-
+func (l *lock) String() string {
+	if l.rejected() {
+		return fmt.Sprintf("Promise { <%v> %v }", l.state, l.ret)
+	} else if l.resolved() {
+		return fmt.Sprintf("Promise { %v }", l.ret)
+	} else {
+		return fmt.Sprintf("Promise { <%v> }", l.state)
+	}
+}
 func (p *GoPromise) execPromise(task promiseTask) {
 	defer catchError(p)
 	task(p.resolve, p.reject)
