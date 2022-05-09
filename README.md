@@ -85,7 +85,7 @@ all task end!
 
 ##### Await()
 ```
-等待Promise settled 并返回结果P和错误信息,若reject未处理则panic
+等待Promise settled 并返回结果和错误信息,若reject未处理则panic
 ```
 ##### UnsafeAwait()
 ```
