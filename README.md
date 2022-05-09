@@ -147,7 +147,7 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ```
 []interface{}
 ```
-#### AllSettled()
+##### AllSettled()
 ```
 和将*async.Plain传入async.Settled() 相同
 ```
