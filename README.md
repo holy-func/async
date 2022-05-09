@@ -31,12 +31,11 @@ go get github.com/holy-func/async
 返回*async.GoPromise 
 ```
 ##### 注意！
-```
-与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同
+与JavaScript中的
+[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同
 Do和Promise中传入的回调函数都不会立即执行
 而是开启协程去执行即除非调用泛wait方法,
 即调用这两个方法都不会阻塞当前函数执行
-```
 
 ```golang
 func main() {
