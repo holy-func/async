@@ -104,19 +104,19 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ```
 ### async.All()
 ```
-接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task rejected或者全部resolved的时候resolve
+接收*async.Plain, 返回的 *async.GoPromise 在任意一个task rejected或者全部resolved的时候resolve
 ```
 ### async.Any()
 ```
-接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者全部rejected的时候resolve
+接收*async.Plain, 返回的 *async.GoPromise 在任意一个task resolved或者全部rejected的时候resolve
 ```
 ### async.Race()
 ```
-接收n个 *async.GOPromise, 返回的 *async.GoPromise 在任意一个task resolved或者rejected的时候resolve
+接收*async.Plain, 返回的 *async.GoPromise 在任意一个task resolved或者rejected的时候resolve
 ```
 ### async.AllSettled()
 ```
-接收n个 *async.GOPromise, 返回的 *async.GoPromise 在所有task resolved或者rejected的时候resolve
+接收*async.Plain, 返回的 *async.GoPromise 在所有task resolved或者rejected的时候resolve
 ```
 ### async.PROD()
 ```
@@ -128,18 +128,26 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ```
 ### async.Resolve()
 ```
-返回一个resolved的 *async.GoPromise并追踪终态
+返回一个resolved的 *async.GoPromise
 ```
 ### async.Reject()
 ```
-返回一个rejected的 *async.GoPromise不追踪终态
+返回一个rejected的 *async.GoPromise
+```
+### async.Plain
+```
+[]interface{}
+```
+#### AllSettled()
+```
+和将*async.Plain传入async.Settled() 相同
 ```
 
 代码示例
 ------------
 
 
-### 公共代码
+### 1-4公共代码
 
 ```golang
 
@@ -286,19 +294,86 @@ resolve 的promise或*async.Thenable会采取最终态
 ```golang
 
 func main() {
-	async.Resolve(&then{"holy-func", 19}).Then(func(v interface{}) interface{} {
-		fmt.Println("跟随resolve会得到最终的值为100 ----", v)
+	fmt.Println(async.Resolve(&then{"holy-func", 19}).Then(func(v interface{}) interface{} {
+		fmt.Println(v,"success callback")
 		return 1
-	}, nil)
+	}, nil),"hi~")
 	async.Wait()
 }
 ```
 #### 输出
 ```
+Promise { <pending> } hi~
 姓名: holy-func
 年龄: 19
 introduce over!!!
 C
 7
-跟随resolve会得到最终的值为100 ---- 100
+100 success callback
+```
+
+* * *
+
+### 05
+
+#### code
+```golang
+
+func a(resolve, reject async.Handler) {
+	resolve("a")
+}
+func b(resolve, reject async.Handler) {
+	reject("b")
+}
+func c(resolve, reject async.Handler) {
+	time.Sleep(time.Second)
+	resolve("c")
+}
+
+type then struct {
+	name  string
+	birth int
+	index int
+}
+
+func (t *then) Then(resolve, reject async.Handler) {
+	fmt.Println("姓名:", t.name)
+	fmt.Println("生日:", t.birth, t.index)
+	resolve("then")
+}
+func main() {
+	async.PROD()
+	taskA := &async.Plain{async.Promise(a), async.Promise(b), async.Promise(c), 1, &then{"holy-func1", 2003, 1}}
+	taskB := &async.Plain{async.Promise(a), async.Promise(b), async.Promise(c), 1, &then{"holy-func2", 2003, 2}}
+	taskC := &async.Plain{async.Promise(a), async.Promise(b), async.Promise(c), 1, &then{"holy-func3", 2003, 3}}
+	taskD := &async.Plain{async.Promise(a), async.Promise(b), async.Promise(c), 1, &then{"holy-func4", 2003, 4}}
+	ret1, err1 := async.All(taskA).Await()
+	ret2, err2 := async.Any(taskB).Await()
+	ret3, err3 := async.Race(taskC).Await()
+	ret4, err4 := async.AllSettled(taskD).Await()
+	fmt.Println(1, "---", ret1, "---", err1, "\n===")
+	fmt.Println(2, "---", ret2, "---", err2, "\n===")
+	fmt.Println(3, "---", ret3, "---", err3, "\n===")
+	fmt.Println(4, "---", ret4, "---", err4, "\n===")
+}
+
+```
+#### 输出
+```
+姓名: holy-func1
+生日: 2003 1
+姓名: holy-func2
+生日: 2003 2
+姓名: holy-func3
+生日: 2003 3
+姓名: holy-func4
+生日: 2003 4
+1 --- <nil> --- b 
+===
+2 --- then --- <nil> 
+===
+3 --- then --- <nil> 
+===
+4 --- [{ Status: resolved, Value: a } { Status: rejected, Value: b } { Status: resolved, Value: c } { Status: resolved, Value: 1 } { Status: resolved, Value: then }] --- <nil> 
+===
 ```

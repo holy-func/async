@@ -13,6 +13,7 @@ const prod = "production"
 
 var wg sync.WaitGroup
 var env = dev
+var tools = map[string]func(*Tasks) *GoPromise{"Race": race, "All": all, "Any": any, "AllSettled": allSettled}
 
 type Thenable interface {
 	Then(Handler, Handler)
@@ -30,10 +31,24 @@ type promiseTask func(Handler, Handler)
 type CallBack func(interface{}) interface{}
 type finallyHandler func()
 type AsyncTask func(...interface{}) interface{}
+type Tasks []*GoPromise
+type Plain []interface{}
+type counter struct {
+	count int
+	m     sync.Mutex
+}
 type Settled struct {
 	Status State
-	value  interface{}
+	Value  interface{}
 }
+
+func (p *Plain) AllSettled() *GoPromise {
+	return AllSettled(p)
+}
+func (s *Settled) String() string {
+	return fmt.Sprintf("{ Status: %s, Value: %s }", s.Status, s.Value)
+}
+
 type then struct {
 	success CallBack
 	fail    CallBack
@@ -64,11 +79,23 @@ func DEV() {
 func PROD() {
 	env = prod
 }
-func pendingERROR() {
-	if env == prod {
-		return
+func (c *counter) do(action func(*counter)) {
+	c.m.Lock()
+	action(c)
+	c.m.Unlock()
+}
+func (c *counter) value() (ret int) {
+	c.m.Lock()
+	ret = c.count
+	c.m.Unlock()
+	return
+}
+func (p *Plain) toPromise() *Tasks {
+	ret := make(Tasks, len(*p))
+	for i, v := range *p {
+		ret[i] = Resolve(v)
 	}
-	panic("promise will be pending forever")
+	return &ret
 }
 func (p *GoPromise) callback() {
 	if p.prototype != nil {
@@ -121,13 +148,9 @@ func (p *GoPromise) callback() {
 	}
 }
 func (p *GoPromise) endTask() {
-	if p.settled() {
-		close(p.async)
-		p.callback()
-		clearTask()
-	} else {
-		pendingERROR()
-	}
+	close(p.async)
+	p.callback()
+	clearTask()
 }
 func (l *lock) waitTask() {
 	if l.settled() {
@@ -156,21 +179,23 @@ func meaninglessError() {
 func (l *lock) settled() bool {
 	return l.state == Rejected || l.state == Resolved
 }
-func (l *lock) resolve(v interface{}) {
-	if !l.settled() {
+func (p *GoPromise) resolve(v interface{}) {
+	if !p.settled() {
 		ret, err := deepAwait(v, v, nil)
 		if err != nil {
-			l.reject(err)
+			p.reject(err)
 		} else {
-			l.state = Resolved
-			l.ret = ret
+			p.state = Resolved
+			p.ret = ret
 		}
+		p.endTask()
 	}
 }
-func (l *lock) reject(v interface{}) {
-	if !l.settled() {
-		l.ret = v
-		l.state = Rejected
+func (p *GoPromise) reject(v interface{}) {
+	if !p.settled() {
+		p.ret = v
+		p.state = Rejected
+		p.endTask()
 	}
 }
 func (l *lock) Await() (ret interface{}, err interface{}) {
@@ -233,25 +258,16 @@ func (l *lock) rejected() bool {
 	return l.state == Rejected
 }
 func Resolve(v interface{}) *GoPromise {
-	_, ok1 := isThenable(v)
-	_, ok2 := isPromise(v)
-	if ok1 || ok2 {
-		ret, err := deepAwait(v, v, nil)
-		if err == nil {
-			return Resolve(ret)
-		} else {
-			return Reject(err)
-		}
+	if then, ok := isThenable(v); ok {
+		return Promise(then.Then)
+	} else if promise, ok := isPromise(v); ok {
+		return promise
 	} else {
-		return Promise(func(resolve, reject Handler) {
-			resolve(v)
-		})
+		return &GoPromise{&lock{make(chan int), v, Resolved, false}, nil}
 	}
 }
 func Reject(v interface{}) *GoPromise {
-	return Promise(func(resolve, reject Handler) {
-		reject(v)
-	})
+	return &GoPromise{&lock{make(chan int), v, Rejected, false}, nil}
 }
 func gPromise() *GoPromise {
 	return &GoPromise{&lock{make(chan int), nil, Pending, false}, nil}
@@ -266,10 +282,9 @@ func catchError(p *GoPromise) {
 	if p.settled() {
 		err = nil
 	} else if err != nil {
-		p.reject(err)
 		p.err = true
+		p.reject(err)
 	}
-	p.endTask()
 }
 func (l *lock) String() string {
 	if l.rejected() {
@@ -316,18 +331,34 @@ func (p *GoPromise) Finally(handler finallyHandler) *GoPromise {
 	go p.handleCallback()
 	return promise
 }
-func Wait() {
-	wg.Wait()
-}
-func Race(promises ...*GoPromise) *GoPromise {
-	if len(promises) == 0 {
+
+func funcCallWithErrorIntercept(tasks *Tasks, funcName string) *GoPromise {
+	if len(*tasks) == 0 {
 		meaninglessError()
 		return nil
 	}
-	wait := make(chan int)
+	return tools[funcName](tasks)
+}
+
+func All(plain *Plain) *GoPromise {
+	return funcCallWithErrorIntercept(plain.toPromise(), "All")
+}
+func Race(plain *Plain) *GoPromise {
+	return funcCallWithErrorIntercept(plain.toPromise(), "Race")
+}
+func AllSettled(plain *Plain) *GoPromise {
+	return funcCallWithErrorIntercept(plain.toPromise(), "AllSettled")
+}
+func Any(plain *Plain) *GoPromise {
+	return funcCallWithErrorIntercept(plain.toPromise(), "Any")
+}
+func Wait() {
+	wg.Wait()
+}
+func race(promises *Tasks) *GoPromise {
 	var newPromise *GoPromise
 	newPromise = Promise(func(resolve, reject Handler) {
-		for _, promise := range promises {
+		for _, promise := range *promises {
 			go func(promise *GoPromise) {
 				ret, err := promise.UnsafeAwait()
 				if newPromise.settled() {
@@ -338,24 +369,18 @@ func Race(promises ...*GoPromise) *GoPromise {
 				} else {
 					reject(err)
 				}
-				close(wait)
 			}(promise)
 		}
-		<-wait
 	})
 	return newPromise
 }
-func All(promises ...*GoPromise) *GoPromise {
-	if len(promises) == 0 {
-		meaninglessError()
-		return nil
-	}
-	result := make([]interface{}, len(promises))
-	var wg sync.WaitGroup
-	count := 0
+func all(promises *Tasks) *GoPromise {
+	num := len(*promises)
+	result := make([]interface{}, num)
+	count := safeAct()
 	var newPromise *GoPromise
 	newPromise = Promise(func(resolve, reject Handler) {
-		for i, promise := range promises {
+		for i, promise := range *promises {
 			wg.Add(1)
 			go func(i int, promise *GoPromise) {
 				ret, err := promise.UnsafeAwait()
@@ -363,71 +388,63 @@ func All(promises ...*GoPromise) *GoPromise {
 					return
 				}
 				if err == nil {
-					result[i] = ret
-					count++
-					wg.Done()
+					count.do(func(c *counter) {
+						result[i] = ret
+						c.count++
+					})
+					if count.value() == num {
+						resolve(result)
+					}
 				} else {
 					reject(err)
-					for i := count; i < len(promises); i++ {
-						wg.Done()
-					}
 				}
 			}(i, promise)
 		}
-		wg.Wait()
-		resolve(result)
 	})
 	return newPromise
 }
-func AllSettled(promises ...*GoPromise) *GoPromise {
-	if len(promises) == 0 {
-		meaninglessError()
-		return nil
-	}
+func allSettled(promises *Tasks) *GoPromise {
 	return Promise(func(resolve, reject Handler) {
-		result := make([]Settled, len(promises))
-		for i, promise := range promises {
+		result := make([]*Settled, len(*promises))
+		for i, promise := range *promises {
 			ret, err := promise.UnsafeAwait()
 			if err == nil {
-				result[i] = Settled{Resolved, ret}
+				result[i] = &Settled{Resolved, ret}
 			} else {
-				result[i] = Settled{Rejected, err}
+				result[i] = &Settled{Rejected, err}
 			}
 		}
 		resolve(result)
 	})
 }
-func Any(promises ...*GoPromise) *GoPromise {
-	if len(promises) == 0 {
-		meaninglessError()
-		return nil
-	}
-	result := make([]interface{}, len(promises))
-	var wg sync.WaitGroup
-	count := 0
+func safeAct() *counter {
+	return &counter{0, sync.Mutex{}}
+}
+func any(promises *Tasks) *GoPromise {
+	num := len(*promises)
+	result := make([]interface{}, num)
+	count := safeAct()
 	var newPromise *GoPromise
 	newPromise = Promise(func(resolve, reject Handler) {
-		for i, promise := range promises {
-			wg.Add(1)
+		for i, promise := range *promises {
 			go func(i int, promise *GoPromise) {
 				ret, err := promise.UnsafeAwait()
 				if newPromise.settled() {
 					return
 				}
 				if err != nil {
-					result[i] = err
-					count++
-					wg.Done()
+					count.do(func(c *counter) {
+						result[i] = err
+						c.count++
+					})
+					if count.value() == num {
+						reject(result)
+					}
 				} else {
 					resolve(ret)
-					for i := count; i < len(promises); i++ {
-						wg.Done()
-					}
 				}
 			}(i, promise)
 		}
-		wg.Wait()
-		reject(result)
 	})
 	return newPromise
 }
