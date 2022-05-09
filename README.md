@@ -107,6 +107,17 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 
 ***
 
+### async.Plain
+```
+[]interface{}
+```
+##### AllSettled()
+```
+和将*async.Plain传入async.Settled() 相同
+```
+
+***
+
 ### async.Wait()
 ```
 阻塞调用该方法的函数并等待使用async包发起的所有asyncTask和PromiseTask的完成
@@ -142,14 +153,6 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ### async.Reject()
 ```
 返回一个rejected的 *async.GoPromise
-```
-### async.Plain
-```
-[]interface{}
-```
-##### AllSettled()
-```
-和将*async.Plain传入async.Settled() 相同
 ```
 
 代码示例
