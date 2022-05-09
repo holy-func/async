@@ -25,11 +25,17 @@ go get github.com/holy-func/async
 
 ### async.Promise()
 ```
-接收一个想要异步调用的函数PromiseTask,在调用时会传入resolve和reject方法用来控制该Promise的状态,状态一旦settled(resolved or rejected)便不可以再改变,返回*async.GoPromise 
+接收一个想要异步调用的函数PromiseTask,
+在调用时会传入resolve和reject方法用来控制该Promise的状态,
+状态一旦settled(resolved or rejected)便不可以再改变,
+返回*async.GoPromise 
 ```
 ##### 注意！
 ```
-与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同Do和Promise中传入的回调函数都不会立即执行而是开启协程去执行即除非调用泛wait方法,即调用这两个方法不会阻塞当前函数执行
+与JavaScript中的[Promise](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Promise "Javascript Promise MDN")不同
+Do和Promise中传入的回调函数都不会立即执行
+而是开启协程去执行即除非调用泛wait方法,
+即调用这两个方法都不会阻塞当前函数执行
 ```
 
 ```golang
@@ -98,6 +104,9 @@ Promise rejected 后的回调函数 返回一个新的 *async.GOPromise
 ```
 Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ```
+
+***
+
 ### async.Wait()
 ```
 阻塞调用该方法的函数并等待使用async包发起的所有asyncTask和PromiseTask的完成
@@ -193,7 +202,7 @@ func (t *then) Then(resolve, reject async.Handler) {
 
 ### 01
 
-#### code
+##### code
 ```golang
 func main() {
 	a := async.Promise(actionA)
@@ -215,7 +224,7 @@ func main() {
 	async.Wait()
 }
 ```
-#### 输出
+##### output
 ```
 A
 3
@@ -229,7 +238,7 @@ task A end!!!
 
 ### 02
 
-#### code
+##### code
 ```golang
 
 func main() {
@@ -251,7 +260,7 @@ func main() {
 
 * * *
 
-#### 输出
+##### output
 ```
 B
 B rejected and catched 2
@@ -260,7 +269,7 @@ resolved---- B failed
 
 ### 03
 
-#### code
+##### code
 ```golang
 
 func main() {
@@ -278,7 +287,7 @@ func main() {
 
 ```
 
-#### 输出
+##### output
 ```
 C
 7
@@ -290,7 +299,7 @@ resolve 的promise或*async.Thenable会采取最终态
 
 ### 04
 
-#### code
+##### code
 ```golang
 
 func main() {
@@ -301,7 +310,7 @@ func main() {
 	async.Wait()
 }
 ```
-#### 输出
+##### output
 ```
 Promise { <pending> } hi~
 姓名: holy-func
@@ -316,7 +325,7 @@ C
 
 ### 05
 
-#### code
+##### code
 ```golang
 
 func a(resolve, reject async.Handler) {
@@ -358,7 +367,7 @@ func main() {
 }
 
 ```
-#### 输出
+##### output
 ```
 姓名: holy-func1
 生日: 2003 1
