@@ -26,7 +26,6 @@ func all(promises *Tasks) *GoPromise {
 	var newPromise *GoPromise
 	newPromise = Promise(func(resolve, reject Handler) {
 		for i, promise := range *promises {
-			wg.Add(1)
 			go func(i int, promise *GoPromise) {
 				ret, err := promise.UnsafeAwait()
 				if newPromise.settled() {

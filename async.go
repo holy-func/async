@@ -7,6 +7,15 @@ import (
 func (p *Plain) AllSettled() *GoPromise {
 	return AllSettled(p)
 }
+func (p *Plain) All() *GoPromise {
+	return All(p)
+}
+func (p *Plain) Race() *GoPromise {
+	return Race(p)
+}
+func (p *Plain) Any() *GoPromise {
+	return Any(p)
+}
 func (s *Settled) String() string {
 	return fmt.Sprintf("{ Status: %s, Value: %s }", s.Status, s.Value)
 }
@@ -31,58 +40,64 @@ func (p *Plain) toPromise() *Tasks {
 }
 func (p *GoPromise) callback() {
 	if p.prototype != nil {
-		defer func() {
-			p.prototype = nil
-		}()
-		if p.prototype.then != nil {
-			v := p.prototype.then
-			if p.resolved() {
+		go func() {
+			prototype := p.prototype
+			p.prototype = p.prototype.next
+			if prototype.then != nil {
+				v := prototype.then
+				if p.resolved() {
+					go v.execPromise(func(resolve, reject Handler) {
+						if v.success != nil {
+							resolve(v.success(p.ret))
+						} else {
+							resolve(p.ret)
+						}
+					})
+				} else if p.rejected() {
+					go v.execPromise(func(resolve, reject Handler) {
+						if v.fail != nil {
+							p.err = false
+							resolve(v.fail(p.ret))
+						} else {
+							reject(p.ret)
+						}
+					})
+				} else {
+					clearTask()
+				}
+			} else if prototype.catch != nil {
+				v := prototype.catch
+				if v.handler != nil {
+					p.err = false
+				}
 				go v.execPromise(func(resolve, reject Handler) {
-					if v.success != nil {
-						resolve(v.success(p.ret))
+					if p.rejected() {
+						if v.handler != nil {
+							resolve(v.handler(p.ret))
+						} else {
+							reject(p.ret)
+						}
 					} else {
 						resolve(p.ret)
 					}
 				})
-			} else if p.rejected() {
+			} else if prototype.finally != nil {
+				v := prototype.finally
 				go v.execPromise(func(resolve, reject Handler) {
-					if v.fail != nil {
-						p.err = false
-						resolve(v.fail(p.ret))
-					} else {
-						reject(p.ret)
-					}
-				})
-			}
-		} else if p.prototype.catch != nil {
-			v := p.prototype.catch
-			if v.handler != nil {
-				p.err = false
-			}
-			go v.execPromise(func(resolve, reject Handler) {
-				if p.rejected() {
-					if v.handler != nil {
-						resolve(v.handler(p.ret))
-					} else {
-						reject(p.ret)
-					}
-				} else {
+					v.handler()
 					resolve(p.ret)
-				}
-			})
-		} else if p.prototype.finally != nil {
-			v := p.prototype.finally
-			go v.execPromise(func(resolve, reject Handler) {
-				v.handler()
-				resolve(p.ret)
-			})
-		}
+				})
+			} else {
+				clearTask()
+			}
+			p.callback()
+		}()
 	}
 }
 func (p *GoPromise) endTask() {
 	close(p.async)
-	p.callback()
 	clearTask()
+	p.callback()
 }
 func (l *lock) waitTask() {
 	if l.settled() {
@@ -113,15 +128,15 @@ func (p *GoPromise) resolve(v interface{}) {
 		} else {
 			p.state = Resolved
 			p.ret = ret
+			p.once.Do(p.endTask)
 		}
-		p.endTask()
 	}
 }
 func (p *GoPromise) reject(v interface{}) {
 	if !p.settled() {
 		p.ret = v
 		p.state = Rejected
-		p.endTask()
+		p.once.Do(p.endTask)
 	}
 }
 func (l *lock) Await() (ret interface{}, err interface{}) {
@@ -169,7 +184,6 @@ func (l *lock) String() string {
 	}
 }
 
-
 func (p *GoPromise) handleCallback() {
 	if p.settled() {
 		p.callback()
@@ -178,21 +192,33 @@ func (p *GoPromise) handleCallback() {
 func (p *GoPromise) Then(success, fail CallBack) *GoPromise {
 	promise := gPromise()
 	collectTask()
-	p.prototype = &prototype{&then{success, fail, promise}, nil, nil}
-	go p.handleCallback()
+	if p.prototype == nil {
+		p.prototype = &prototype{&then{success, fail, promise}, nil, nil, nil}
+	} else {
+		p.prototype.next = &prototype{&then{success, fail, promise}, nil, nil, nil}
+	}
+	p.handleCallback()
 	return promise
 }
 func (p *GoPromise) Catch(handler CallBack) *GoPromise {
 	promise := gPromise()
 	collectTask()
-	p.prototype = &prototype{nil, &catch{handler, promise}, nil}
-	go p.handleCallback()
+	if p.prototype == nil {
+		p.prototype = &prototype{nil, &catch{handler, promise}, nil, nil}
+	} else {
+		p.prototype.next = &prototype{nil, &catch{handler, promise}, nil, nil}
+	}
+	p.handleCallback()
 	return promise
 }
 func (p *GoPromise) Finally(handler finallyHandler) *GoPromise {
 	promise := gPromise()
 	collectTask()
-	p.prototype = &prototype{nil, nil, &finally{handler, promise}}
-	go p.handleCallback()
+	if p.prototype == nil {
+		p.prototype = &prototype{nil, nil, &finally{handler, promise}, nil}
+	} else {
+		p.prototype.next = &prototype{nil, nil, &finally{handler, promise}, nil}
+	}
+	p.handleCallback()
 	return promise
 }

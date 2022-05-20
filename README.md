@@ -112,7 +112,19 @@ Promise settled后一定会执行的函数 返回一个新的 *async.GOPromise
 ```
 ##### AllSettled()
 ```
-和将*async.Plain传入async.Settled() 相同
+和将*async.Plain传入async.Allsettled() 相同
+```
+##### All()
+```
+和将*async.Plain传入async.All() 相同
+```
+##### Any()
+```
+和将*async.Plain传入async.Any() 相同
+```
+##### Race()
+```
+和将*async.Plain传入async.Race() 相同
 ```
 
 ***

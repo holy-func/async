@@ -12,11 +12,11 @@ func Resolve(v interface{}) *GoPromise {
 	} else if promise, ok := isPromise(v); ok {
 		return promise
 	} else {
-		return &GoPromise{&lock{make(chan int), v, Resolved, false}, nil}
+		return &GoPromise{&lock{make(chan int), v, Resolved, false, nil}, nil}
 	}
 }
 func Reject(v interface{}) *GoPromise {
-	return &GoPromise{&lock{make(chan int), v, Rejected, false}, nil}
+	return &GoPromise{&lock{make(chan int), v, Rejected, false, nil}, nil}
 }
 func Do(task AsyncTask, params ...interface{}) *GoPromise {
 	return Promise(func(resolve, reject Handler) {

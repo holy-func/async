@@ -13,6 +13,7 @@ type lock struct {
 	ret   interface{}
 	state State
 	err   bool
+	once *sync.Once
 }
 type State string
 type Handler func(interface{})
@@ -47,6 +48,7 @@ type prototype struct {
 	*then
 	*catch
 	*finally
+	next *prototype
 }
 
 type GoPromise struct {

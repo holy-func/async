@@ -30,7 +30,7 @@ func clearTask() {
 	wg.Done()
 }
 func gPromise() *GoPromise {
-	return &GoPromise{&lock{make(chan int), nil, Pending, false}, nil}
+	return &GoPromise{&lock{make(chan int), nil, Pending, false, &sync.Once{}}, nil}
 }
 func isPromise(v interface{}) (*GoPromise, bool) {
 	obj, ok := v.(*GoPromise)
